@@ -2,12 +2,12 @@ from typing import Dict, Tuple, Any
 import os
 import random
 import slimevolleygym
-import multiprocessing as mp
+import concurrent.futures
 from stable_baselines3.ppo import PPO
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.logger import Logger, configure
 
-BASE_MODEL = PPO.load("")  # Load model to use as base model
+BASE_MODEL = PPO.load("my_ppo1_selfplay/final_model.zip")  # Load model to use as base model
 REWARD_DIFF = 0.5  # must achieve a mean score above this to replace prev best self
 TRAINING_UNITS: int = 3  # Should be depending on machine being run on
 NUM_ROUNDS: int = 10
@@ -32,10 +32,10 @@ class AgainstAgentEnv(slimevolleygym.SlimeVolleyEnv):
     def __init__(self, other_model):
         super(AgainstAgentEnv, self).__init__()
         self.policy = self
-        self.model = other_model
 
     def predict(self, obs):
-        action, _ = self.model.predict(obs)
+        model, _ = random.choice(list(models_and_scores.values()))
+        action, _ = model.predict(obs)
         return action
 
 
@@ -56,7 +56,8 @@ class AgainstAgentCallback(EvalCallback):
 
 
 # Train against the best and replace the worse in the list
-def train(agent_key, agent_model):
+def train(agent_key):
+    agent_model = models_and_scores[agent_key]
     configure(folder=LOG_DIR)
 
     env = AgainstAgentEnv(agent_model)
@@ -85,12 +86,15 @@ def train(agent_key, agent_model):
 
 if __name__ == '__main__':
     assert (TRAINING_UNITS < len(models_and_scores))
-    for _ in range(NUM_ROUNDS):
-        # Pick the three best models
-        for (key, (model, mean_reward)) in sorted(models_and_scores, key=lambda entry: entry[1][1])[:TRAINING_UNITS]:
-            # Train against the three best models
-            train(key, model)
 
-    # Save top 3 models
-    for (key, (model, _)) in models_and_scores[:3]:
-        model.save(os.path.join(LOG_DIR, "final_model" + str(key).zfill(5)))
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        for _ in range(NUM_ROUNDS):
+            executor.map(
+                train,  # Train to beat current best
+                [key for (key, (model, reward)) in  # Pick the three best models
+                 sorted(list(models_and_scores.items()), key=lambda entry: entry[1])[:TRAINING_UNITS]]
+            )
+
+        # Save top 3 models
+        for (key, (model, _)) in models_and_scores[:3]:
+            model.save(os.path.join(LOG_DIR, "final_model" + str(key).zfill(5)))
