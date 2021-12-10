@@ -767,7 +767,7 @@ class SlimeVolleyEnv(gym.Env):
     from_pixels = False
     atari_mode = False
     survival_bonus = False  # Depreciated: augment reward, easier to train
-    multiagent = True  # optional args anyways
+    multi_agent = True  # optional args anyways
 
     def __init__(self):
         """
@@ -810,7 +810,7 @@ class SlimeVolleyEnv(gym.Env):
         self.game = Game()
         self.ale = self.game.agent_right  # for compatibility for some models that need the self.ale.lives() function
 
-        self.policy = BaselinePolicy()  # the “bad guy”
+        self.base_line_policy = BaselinePolicy()  # the “bad guy”
 
         self.viewer = None
 
@@ -839,7 +839,9 @@ class SlimeVolleyEnv(gym.Env):
         assert (int(n) == n) and (n >= 0) and (n < 6)
         return self.action_table[n]
 
-    def step(self, action, otherAction=None):
+    # Receives two actions, one for the right agent and the other for the left agent.
+    # Left uses baseline policy action if None
+    def step(self, action, other_action=None):
         """
         baseAction is only used if multiagent mode is True
         note: although the action space is multi-binary, float vectors
@@ -848,18 +850,19 @@ class SlimeVolleyEnv(gym.Env):
         done = False
         self.t += 1
 
+        #
         if self.otherAction is not None:
-            otherAction = self.otherAction
+            other_action = self.otherAction
 
-        if otherAction is None:  # override baseline policy
+        if other_action is None:  # override baseline policy
             obs = self.game.agent_left.getObservation()
-            otherAction = self.policy.predict(obs)
+            other_action = self.base_line_policy.predict(obs)
 
         if self.atari_mode:
             action = self.discreteToBox(action)
-            otherAction = self.discreteToBox(otherAction)
+            other_action = self.discreteToBox(other_action)
 
-        self.game.agent_left.setAction(otherAction)
+        self.game.agent_left.setAction(other_action)
         self.game.agent_right.setAction(action)  # external agent is agent_right
 
         reward = self.game.step()
@@ -873,7 +876,7 @@ class SlimeVolleyEnv(gym.Env):
             done = True
 
         otherObs = None
-        if self.multiagent:
+        if self.multi_agent:
             if self.from_pixels:
                 otherObs = cv2.flip(obs, 1)  # horizontal flip
             else:

@@ -38,10 +38,12 @@ np.set_printoptions(threshold=20, precision=4, suppress=True, linewidth=200)
 
 PPO1 = None  # from stable_baselines import PPO1 (only load if needed.)
 
+model_dir = "zoo_my"
+
 
 class PPOPolicy:
     def __init__(self, path):
-        self.model = PPO1.load(path)
+        self.model = PPO.load(path)
 
     def predict(self, obs):
         action, state = self.model.predict(obs, deterministic=True)
@@ -119,9 +121,9 @@ if __name__ == "__main__":
 
     PATH = {
         "baseline": None,
-        "ppo": "zoo/ppo/best_model.zip",
-        "cma": "zoo/cmaes/slimevolley.cma.64.96.best.json",
-        "ga": "zoo/ga_sp/ga.json",
+        "ppo": f"{model_dir}/ppo/best_model.zip",
+        "cma": f"{model_dir}/cmaes/slimevolley.cma.64.96.best.json",
+        "ga": f"{model_dir}/ga_sp/ga.json",
         "random": None,
     }
 

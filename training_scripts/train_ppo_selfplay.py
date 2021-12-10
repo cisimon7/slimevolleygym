@@ -7,30 +7,36 @@ import gym
 import slimevolleygym
 import numpy as np
 
-from stable_baselines.ppo1 import PPO1
-from stable_baselines.common.policies import MlpPolicy
-from stable_baselines import logger
-from stable_baselines.common.callbacks import EvalCallback
+# from stable_baselines.ppo1 import PPO1
+from stable_baselines3.ppo import PPO
+# from stable_baselines.common.policies import MlpPolicy
+# from stable_baselines import logger
+from stable_baselines3.common.logger import Logger, configure
+# from stable_baselines.common.callbacks import EvalCallback
+from stable_baselines3.common.callbacks import EvalCallback
 
 from shutil import copyfile  # keep track of generations
 
 # Settings
 SEED = 17
-NUM_TIMESTEPS = int(1e9)
+NUM_TIMESTEPS = int(1e4) # 1e9
 EVAL_FREQ = int(1e5)
 EVAL_EPISODES = int(1e2)
 BEST_THRESHOLD = 0.5  # must achieve a mean score above this to replace prev best self
 
 RENDER_MODE = False  # set this to false if you plan on running for full 1000 trials.
 
-LOGDIR = "ppo1_selfplay"
+LOGDIR = "my_ppo1_selfplay"
 
 
+# Is ths a gym environment or a policy? Seems to me like a combination of both
+# A type of SlimVolleyEnv and also can be used as a Policy class with predict
+# Since step is not overridden, then the loaded prev best model only trains with the BaselinePolicy()
 class SlimeVolleySelfPlayEnv(slimevolleygym.SlimeVolleyEnv):
     # wrapper over the normal single player env, but loads the best self play model
     def __init__(self):
         super(SlimeVolleySelfPlayEnv, self).__init__()
-        self.policy = self
+        self.policy = self  # acting as a policy class. Here, it overrides the BaselinePolicy in the SlimeVolleyEnv
         self.best_model = None
         self.best_model_filename = None
 
@@ -41,18 +47,19 @@ class SlimeVolleySelfPlayEnv(slimevolleygym.SlimeVolleyEnv):
             action, _ = self.best_model.predict(obs)
             return action
 
+    # Reset brings the best previously trained policy
     def reset(self):
         # load model if it's there
-        modellist = [f for f in os.listdir(LOGDIR) if f.startswith("history")]
-        modellist.sort()
-        if len(modellist) > 0:
-            filename = os.path.join(LOGDIR, modellist[-1])  # the latest best model
-            if filename != self.best_model_filename:
+        model_list = [f for f in os.listdir(LOGDIR) if f.startswith("history")]
+        model_list.sort()
+        if len(model_list) > 0:
+            filename = os.path.join(LOGDIR, model_list[-1])  # the latest best model
+            if filename != self.best_model_filename:  # check current best is not the same as main best
                 print("loading model: ", filename)
-                self.best_model_filename = filename
+                self.best_model_filename = filename  # save current best as main best
                 if self.best_model is not None:
                     del self.best_model
-                self.best_model = PPO1.load(filename, env=self)
+                self.best_model = PPO.load(filename, env=self)  # load new main best
         return super(SlimeVolleySelfPlayEnv, self).reset()
 
 
@@ -70,7 +77,7 @@ class SelfPlayCallback(EvalCallback):
             self.generation += 1
             print("SELFPLAY: mean_reward achieved:", self.best_mean_reward)
             print("SELFPLAY: new best model, bumping up generation to", self.generation)
-            source_file = os.path.join(LOGDIR, "best_model.zip")
+            source_file = os.path.join(LOGDIR, f"best_model.zip")
             backup_file = os.path.join(LOGDIR, "history_" + str(self.generation).zfill(8) + ".zip")
             copyfile(source_file, backup_file)
             self.best_mean_reward = BEST_THRESHOLD
@@ -87,7 +94,7 @@ def rollout(env, policy):
     while not done:
 
         action, _states = policy.predict(obs)
-        obs, reward, done, _ = env.step(action)
+        obs, reward, done, _ = env.step(action)  # Doesn't seem to be playing against a modified version of itself
 
         total_reward += reward
 
@@ -99,14 +106,17 @@ def rollout(env, policy):
 
 def train():
     # train selfplay agent
-    logger.configure(folder=LOGDIR)
+    # logger.configure(folder=LOGDIR)
+    configure(folder=LOGDIR)
 
     env = SlimeVolleySelfPlayEnv()
     env.seed(SEED)
 
     # take mujoco hyperparams (but doubled timesteps_per_actorbatch to cover more steps.)
-    model = PPO1(MlpPolicy, env, timesteps_per_actorbatch=4096, clip_param=0.2, entcoeff=0.0, optim_epochs=10,
-                 optim_stepsize=3e-4, optim_batchsize=64, gamma=0.99, lam=0.95, schedule='linear', verbose=2)
+    # model = PPO1(MlpPolicy, env, timesteps_per_actorbatch=4096, clip_param=0.2, entcoeff=0.0, optim_epochs=10,
+    #              optim_stepsize=3e-4, optim_batchsize=64, gamma=0.99, lam=0.95, schedule='linear', verbose=2)
+    model = PPO("MlpPolicy", env, clip_range=0.2, ent_coef=0.0, n_epochs=10, n_steps=2048, batch_size=64, gamma=0.99,
+                learning_rate=3e-4, verbose=2)
 
     eval_callback = SelfPlayCallback(env,
                                      best_model_save_path=LOGDIR,

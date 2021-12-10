@@ -8,6 +8,7 @@ import math
 import numpy as np
 import gym
 import slimevolleygym
+from gym.spaces import Discrete, Space
 
 np.set_printoptions(threshold=20, precision=3, suppress=True, linewidth=200)
 
@@ -80,7 +81,6 @@ if __name__ == "__main__":
     steps = 0
     total_reward = 0
     action = np.array([0, 0, 0])
-
     done = False
 
     while not done:
