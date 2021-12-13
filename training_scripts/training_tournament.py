@@ -1,15 +1,23 @@
-from typing import Dict, Tuple, Any
+import time
+from typing import Dict, Tuple, Any, Optional, List
 import os
 import random
+
 import slimevolleygym
 import concurrent.futures
+import multiprocessing as mp
 from stable_baselines3.ppo import PPO
+from multiprocessing import Value, Lock, Process
+from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.logger import Logger, configure
 
 BASE_MODEL = PPO.load("my_ppo1_selfplay/final_model.zip")  # Load model to use as base model
 REWARD_DIFF = 0.5  # must achieve a mean score above this to replace prev best self
 TRAINING_UNITS: int = 3  # Should be depending on machine being run on
+INCREASE_PERIOD = 10
 NUM_ROUNDS: int = 10
 MAX_SEED: int = 100
 EVAL_FREQ = int(1e5)
@@ -18,83 +26,99 @@ TIME_STEPS = int(1e4)
 
 LOG_DIR = "training_tour"
 
+lock = Lock()
+
 # Models to be trained against initial states
-models_and_scores: Dict[int, Tuple[Any, float]] = {
-    0: (BASE_MODEL, 0.0),
-    1: (BASE_MODEL, 0.0),
-    2: (BASE_MODEL, 0.0),
-    3: (BASE_MODEL, 0.0),
-    4: (BASE_MODEL, 0.0)
-}
+models_archive: List[Tuple[Optional[BaseAlgorithm], Any]] = [
+    # (Model, mean_reward)
+    (BASE_MODEL, 0),  # Initial Policy
+    (BASE_MODEL, 0),  # Initial Policy
+    (BASE_MODEL, 0)   # Initial Policy
+]
 
 
-class AgainstAgentEnv(slimevolleygym.SlimeVolleyEnv):
-    def __init__(self, other_model):
-        super(AgainstAgentEnv, self).__init__()
+class TrainAgainstAllAgentsEnv(slimevolleygym.SlimeVolleyEnv):
+    def __init__(self):
+        super(TrainAgainstAllAgentsEnv, self).__init__()
         self.policy = self
 
     def predict(self, obs):
-        model, _ = random.choice(list(models_and_scores.values()))
-        action, _ = model.predict(obs)
+        rnd_model, _ = random.choice(models_archive)  # Selects random model from archive of models
+        action, _ = rnd_model.predict(obs)
         return action
 
 
-class AgainstAgentCallback(EvalCallback):
-    def __init__(self, key: int, *args, **kwargs):
-        super(AgainstAgentCallback, self).__init__(*args, **kwargs)
-        self.best_mean_reward = models_and_scores[key][1]
-        self.generation = 0
-        self.key = key
+class AgainstAllAgentCallback(EvalCallback):
+    def __init__(self, cur_round: int, *args, **kwargs):
+        super(AgainstAllAgentCallback, self).__init__(*args, **kwargs)
+        self.round = cur_round
 
-    # Check if new_model has trained enough to surpass current best model
     def _on_step(self) -> bool:
-        result = super(AgainstAgentCallback, self)._on_step()
-        if result and self.last_mean_reward > (self.best_mean_reward + REWARD_DIFF):
-            print(f"Agent {self.key} mean_reward surpassed")
+        result = super(AgainstAllAgentCallback, self)._on_step()
+
+        # Check if number of rounds has increased by INCREASE_PERIOD
+        if result and (self.evaluations_timesteps % INCREASE_PERIOD == 0):
+            models_archive.append((self.model, self.last_mean_reward))
+            print("New Agent Variant Added to archive")
 
         return result
 
 
-# Train against the best and replace the worse in the list
-def train(agent_key):
-    agent_model = models_and_scores[agent_key]
+def train():
     configure(folder=LOG_DIR)
 
-    env = AgainstAgentEnv(agent_model)
+    env = SubprocVecEnv([(lambda: TrainAgainstAllAgentsEnv()) for _ in range(2)])  # TrainAgainstAllAgentsEnv()
     env.seed(random.choice(range(MAX_SEED)))
 
     new_model = PPO("MlpPolicy", env, clip_range=0.2, ent_coef=0.0, n_epochs=10, n_steps=2048, batch_size=64,
                     gamma=0.99, learning_rate=3e-4, verbose=2)
 
-    eval_callback = AgainstAgentCallback(key=agent_key,
-                                         eval_env=env,
-                                         best_model_save_path=LOG_DIR,
-                                         log_path=LOG_DIR,
-                                         eval_freq=EVAL_FREQ,
-                                         n_eval_episodes=EVAL_EPISODES,
-                                         deterministic=False)
+    eval_callback = AgainstAllAgentCallback(eval_env=env,
+                                            best_model_save_path=LOG_DIR,
+                                            log_path=LOG_DIR,
+                                            eval_freq=EVAL_FREQ,
+                                            n_eval_episodes=EVAL_EPISODES,
+                                            deterministic=False)
 
-    new_model.learn(total_timesteps=TIME_STEPS, callback=eval_callback)
+    new_model.learn(total_timesteps=TIME_STEPS, callback=[eval_callback])
 
-    # Remove the worst model and replace it with new_model
-    worst_key, worst_value = sorted(models_and_scores.items(), key=lambda entry: entry[1][1])[-1]
-    models_and_scores.pop(worst_key)
-    models_and_scores[worst_key + 1] = (new_model, 0.0)
+    model.save(os.path.join(LOG_DIR, "final_model"))  # probably never get to this point.
 
     env.close()
 
 
+def do_something(seconds):
+    time.sleep(seconds)
+    print(f"Done sleeping {seconds}")
+
+
 if __name__ == '__main__':
-    assert (TRAINING_UNITS < len(models_and_scores))
 
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        for _ in range(NUM_ROUNDS):
-            executor.map(
-                train,  # Train to beat current best
-                [key for (key, (model, reward)) in  # Pick the three best models
-                 sorted(list(models_and_scores.items()), key=lambda entry: entry[1])[:TRAINING_UNITS]]
-            )
+    start = time.perf_counter()
 
-        # Save top 3 models
-        for (key, (model, _)) in models_and_scores[:3]:
-            model.save(os.path.join(LOG_DIR, "final_model" + str(key).zfill(5)))
+    train()
+
+    # processes = []
+    # for round in range(NUM_ROUNDS):
+    #     for (model, _) in models_archive:
+    #         p = Process(target=train, args=(round,))
+    #         p.start()
+    #         processes.append(p)
+    #
+    #     for process in processes:
+    #         process.join()
+
+    # for round in range(NUM_ROUNDS):
+    #     with concurrent.futures.ProcessPoolExecutor() as executor:
+    #         executor.map(
+    #             train,  # Train to beat current best
+    #             [round for _ in range(len(models_archive))]
+    #         )
+
+    # Save top 5 models in archive
+    for (i, (model, _)) in enumerate(list(sorted(models_archive, key=(lambda archive: archive[1]), reverse=True))[:5]):
+        model.save(os.path.join(LOG_DIR, "agent_" + str(i).zfill(3)))
+
+    end = time.perf_counter()
+
+    print(f"Total Training time: {end - start} seconds\nBest Five models saved")

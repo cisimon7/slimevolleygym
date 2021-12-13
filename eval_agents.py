@@ -31,6 +31,7 @@ import slimevolleygym
 from slimevolleygym.mlp import makeSlimePolicy, makeSlimePolicyLite  # simple pretrained models
 from slimevolleygym import BaselinePolicy
 from time import sleep
+from stable_baselines3.ppo import PPO
 
 # import cv2
 
@@ -38,7 +39,7 @@ np.set_printoptions(threshold=20, precision=4, suppress=True, linewidth=200)
 
 PPO1 = None  # from stable_baselines import PPO1 (only load if needed.)
 
-model_dir = "zoo_my"
+model_dir = "zoo"
 
 
 class PPOPolicy:
@@ -109,7 +110,7 @@ def evaluate_multiagent(env, policy0, policy1, render_mode=False, n_trials=1000,
 
 if __name__ == "__main__":
 
-    APPROVED_MODELS = ["baseline", "ppo", "ga", "cma", "random"]
+    APPROVED_MODELS = ["baseline", "ppo", "ga", "cma", "random", "tour_ppo"]
 
 
     def checkchoice(choice):
@@ -121,9 +122,10 @@ if __name__ == "__main__":
 
     PATH = {
         "baseline": None,
-        "ppo": f"{model_dir}/ppo/best_model.zip",
+        "ppo": "training_scripts/my_ppo1_selfplay/final_model.zip",  # f"{model_dir}/ppo/best_model",
         "cma": f"{model_dir}/cmaes/slimevolley.cma.64.96.best.json",
         "ga": f"{model_dir}/ga_sp/ga.json",
+        "tour_ppo": "training_scripts/training_tour/final_model00000.zip",
         "random": None,
     }
 
@@ -132,6 +134,7 @@ if __name__ == "__main__":
         "ppo": PPOPolicy,
         "cma": makeSlimePolicy,
         "ga": makeSlimePolicyLite,
+        "tour_ppo": PPOPolicy,
         "random": RandomPolicy,
     }
 
