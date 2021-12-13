@@ -8,7 +8,6 @@ import slimevolleygym
 import concurrent.futures
 import multiprocessing as mp
 from stable_baselines3.ppo import PPO
-from multiprocessing import Value, Lock, Process
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import EvalCallback
@@ -18,14 +17,11 @@ from stable_baselines3.common.logger import Logger, configure
 from slimevolleygym import BaselinePolicy
 
 BASE_MODEL = PPO.load("PPO_SelfPlay/best_model.zip")  # Load model to use as base model
-REWARD_DIFF = 0.5  # must achieve a mean score above this to replace prev best self
-TRAINING_UNITS: int = 3  # Should be depending on machine being run on
-INCREASE_PERIOD = 10
-NUM_ROUNDS: int = 10
+INCREASE_PERIOD = 1e4
 MAX_SEED: int = 100
 EVAL_FREQ = int(1e5)
 EVAL_EPISODES = int(1e2)
-TIME_STEPS = int(1e4)
+TIME_STEPS = int(1e9)
 
 LOG_DIR = "PPO_TrainingTour"
 
@@ -57,14 +53,14 @@ class AgainstArchiveAgentCallback(EvalCallback):
     def _on_step(self) -> bool:
         result = super(AgainstArchiveAgentCallback, self)._on_step()
 
-        if self.num_timesteps % EVAL_FREQ:
+        if self.num_timesteps % EVAL_FREQ == 0:
             print(f"Current Best: {self.best_mean_reward}")
 
         if result and self.current_best < self.best_mean_reward < 0:
-            self.model.save(os.path.join(LOG_DIR, "current_best"+str(int(self.best_mean_reward)).zfill(5)))
+            self.model.save(os.path.join(LOG_DIR, "current_best" + str(int(self.best_mean_reward)).zfill(5)))
 
         # Check if number of rounds has increased by INCREASE_PERIOD
-        if result and (self.evaluations_timesteps % INCREASE_PERIOD == 0):
+        if result and (self.num_timesteps % INCREASE_PERIOD == 0):
             models_archive.append((self.model, self.last_mean_reward))
             print("New Agent Variant Added to archive")
 
@@ -85,7 +81,7 @@ def train():
     # SubprocVecEnv([(lambda: TrainAgainstAllAgentsEnv()) for _ in range(2)])  # TrainAgainstAllAgentsEnv()
     env.seed(random.choice(range(MAX_SEED)))
 
-    new_model = PPO("MlpPolicy", env, learning_rate=1e-4, verbose=2)
+    new_model = PPO("MlpPolicy", env, learning_rate=(lambda rate_left: rate_left * 3e-4), verbose=2)
 
     eval_callback = AgainstArchiveAgentCallback(eval_env=env,
                                                 best_model_save_path=LOG_DIR,
@@ -96,7 +92,7 @@ def train():
 
     new_model.learn(total_timesteps=TIME_STEPS, callback=[eval_callback])
 
-    model.save(os.path.join(LOG_DIR, "final_model"))  # probably never get to this point.
+    new_model.save(os.path.join(LOG_DIR, "final_model"))  # probably never get to this point.
 
     env.close()
 
@@ -111,23 +107,6 @@ if __name__ == '__main__':
     start = time.perf_counter()
 
     train()
-
-    # processes = []
-    # for round in range(NUM_ROUNDS):
-    #     for (model, _) in models_archive:
-    #         p = Process(target=train, args=(round,))
-    #         p.start()
-    #         processes.append(p)
-    #
-    #     for process in processes:
-    #         process.join()
-
-    # for round in range(NUM_ROUNDS):
-    #     with concurrent.futures.ProcessPoolExecutor() as executor:
-    #         executor.map(
-    #             train,  # Train to beat current best
-    #             [round for _ in range(len(models_archive))]
-    #         )
 
     # Save top 5 models in archive
     for (i, (model, _)) in enumerate(list(sorted(models_archive, key=(lambda archive: archive[1]), reverse=True))[:5]):
