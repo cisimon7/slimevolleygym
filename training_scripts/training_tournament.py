@@ -14,6 +14,8 @@ from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.logger import Logger, configure
 
+from slimevolleygym import BaselinePolicy
+
 BASE_MODEL = PPO.load("my_ppo1_selfplay/final_model.zip")  # Load model to use as base model
 REWARD_DIFF = 0.5  # must achieve a mean score above this to replace prev best self
 TRAINING_UNITS: int = 3  # Should be depending on machine being run on
@@ -24,16 +26,13 @@ EVAL_FREQ = int(1e5)
 EVAL_EPISODES = int(1e2)
 TIME_STEPS = int(1e4)
 
-LOG_DIR = "training_tour"
-
-lock = Lock()
+LOG_DIR = "PPO_TrainingTour"
 
 # Models to be trained against initial states
 models_archive: List[Tuple[Optional[BaseAlgorithm], Any]] = [
     # (Model, mean_reward)
     (BASE_MODEL, 0),  # Initial Policy
-    (BASE_MODEL, 0),  # Initial Policy
-    (BASE_MODEL, 0)   # Initial Policy
+    (BaselinePolicy(), 0),  # Initial Policy
 ]
 
 

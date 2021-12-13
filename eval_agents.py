@@ -122,7 +122,7 @@ if __name__ == "__main__":
 
     PATH = {
         "baseline": None,
-        "ppo": "training_scripts/my_ppo1_selfplay/final_model.zip",  # f"{model_dir}/ppo/best_model",
+        "ppo": "training_scripts/PPO_SelfPlay/best_model.zip", #"training_scripts/my_ppo1_selfplay/final_model.zip",  # f"{model_dir}/ppo/best_model",
         "cma": f"{model_dir}/cmaes/slimevolley.cma.64.96.best.json",
         "ga": f"{model_dir}/ga_sp/ga.json",
         "tour_ppo": "training_scripts/training_tour/final_model00000.zip",
