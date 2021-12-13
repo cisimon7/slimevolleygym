@@ -1,4 +1,5 @@
 import time
+from shutil import copyfile
 from typing import Dict, Tuple, Any, Optional, List
 import os
 import random
@@ -16,7 +17,7 @@ from stable_baselines3.common.logger import Logger, configure
 
 from slimevolleygym import BaselinePolicy
 
-BASE_MODEL = PPO.load("my_ppo1_selfplay/final_model.zip")  # Load model to use as base model
+BASE_MODEL = PPO.load("PPO_SelfPlay/best_model.zip")  # Load model to use as base model
 REWARD_DIFF = 0.5  # must achieve a mean score above this to replace prev best self
 TRAINING_UNITS: int = 3  # Should be depending on machine being run on
 INCREASE_PERIOD = 10
@@ -36,9 +37,9 @@ models_archive: List[Tuple[Optional[BaseAlgorithm], Any]] = [
 ]
 
 
-class TrainAgainstAllAgentsEnv(slimevolleygym.SlimeVolleyEnv):
+class TrainAgainstArchiveAgentsEnv(slimevolleygym.SlimeVolleyEnv):
     def __init__(self):
-        super(TrainAgainstAllAgentsEnv, self).__init__()
+        super(TrainAgainstArchiveAgentsEnv, self).__init__()
         self.policy = self
 
     def predict(self, obs):
@@ -47,18 +48,32 @@ class TrainAgainstAllAgentsEnv(slimevolleygym.SlimeVolleyEnv):
         return action
 
 
-class AgainstAllAgentCallback(EvalCallback):
-    def __init__(self, cur_round: int, *args, **kwargs):
-        super(AgainstAllAgentCallback, self).__init__(*args, **kwargs)
-        self.round = cur_round
+class AgainstArchiveAgentCallback(EvalCallback):
+    def __init__(self, *args, **kwargs):
+        super(AgainstArchiveAgentCallback, self).__init__(*args, **kwargs)
+        self.current_best = self.best_mean_reward
+        self.threshold = 0.1
 
     def _on_step(self) -> bool:
-        result = super(AgainstAllAgentCallback, self)._on_step()
+        result = super(AgainstArchiveAgentCallback, self)._on_step()
+
+        if self.num_timesteps % EVAL_FREQ:
+            print(f"Current Best: {self.best_mean_reward}")
+
+        if result and self.current_best < self.best_mean_reward < 0:
+            self.model.save(os.path.join(LOG_DIR, "current_best"+str(int(self.best_mean_reward)).zfill(5)))
 
         # Check if number of rounds has increased by INCREASE_PERIOD
         if result and (self.evaluations_timesteps % INCREASE_PERIOD == 0):
             models_archive.append((self.model, self.last_mean_reward))
             print("New Agent Variant Added to archive")
+
+        if self.best_mean_reward > self.threshold:
+            print("TOUR_PLAY: New Positive reward achieved", )
+            source_file = os.path.join(LOG_DIR, f"best_model.zip")
+            backup_file = os.path.join(LOG_DIR, "Agent_" + str(self.best_mean_reward).zfill(5) + ".zip")
+            copyfile(source_file, backup_file)
+            self.threshold += 0.1
 
         return result
 
@@ -66,18 +81,18 @@ class AgainstAllAgentCallback(EvalCallback):
 def train():
     configure(folder=LOG_DIR)
 
-    env = SubprocVecEnv([(lambda: TrainAgainstAllAgentsEnv()) for _ in range(2)])  # TrainAgainstAllAgentsEnv()
+    env = TrainAgainstArchiveAgentsEnv()
+    # SubprocVecEnv([(lambda: TrainAgainstAllAgentsEnv()) for _ in range(2)])  # TrainAgainstAllAgentsEnv()
     env.seed(random.choice(range(MAX_SEED)))
 
-    new_model = PPO("MlpPolicy", env, clip_range=0.2, ent_coef=0.0, n_epochs=10, n_steps=2048, batch_size=64,
-                    gamma=0.99, learning_rate=3e-4, verbose=2)
+    new_model = PPO("MlpPolicy", env, learning_rate=1e-4, verbose=2)
 
-    eval_callback = AgainstAllAgentCallback(eval_env=env,
-                                            best_model_save_path=LOG_DIR,
-                                            log_path=LOG_DIR,
-                                            eval_freq=EVAL_FREQ,
-                                            n_eval_episodes=EVAL_EPISODES,
-                                            deterministic=False)
+    eval_callback = AgainstArchiveAgentCallback(eval_env=env,
+                                                best_model_save_path=LOG_DIR,
+                                                log_path=LOG_DIR,
+                                                eval_freq=EVAL_FREQ,
+                                                n_eval_episodes=EVAL_EPISODES,
+                                                deterministic=False)
 
     new_model.learn(total_timesteps=TIME_STEPS, callback=[eval_callback])
 
