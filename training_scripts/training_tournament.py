@@ -4,6 +4,8 @@ from typing import Dict, Tuple, Any, Optional, List
 import os
 import random
 
+from stable_baselines3.common.monitor import Monitor
+
 import slimevolleygym
 import concurrent.futures
 import multiprocessing as mp
@@ -17,7 +19,7 @@ from stable_baselines3.common.logger import Logger, configure
 from slimevolleygym import BaselinePolicy
 
 BASE_MODEL = PPO.load("PPO_SelfPlay/best_model.zip")  # Load model to use as base model
-INCREASE_PERIOD = 1e4
+INCREASE_PERIOD = 1e5
 MAX_SEED: int = 100
 EVAL_FREQ = int(1e5)
 EVAL_EPISODES = int(1e2)
@@ -59,12 +61,13 @@ class AgainstArchiveAgentCallback(EvalCallback):
         if result and self.current_best < self.best_mean_reward < 0:
             self.model.save(os.path.join(LOG_DIR, "current_best" + str(int(self.best_mean_reward)).zfill(5)))
 
-        # Check if number of rounds has increased by INCREASE_PERIOD
-        if result and (self.num_timesteps % INCREASE_PERIOD == 0):
-            models_archive.append((self.model, self.last_mean_reward))
-            print("New Agent Variant Added to archive")
-
+        # Archive grows only when we've reach certain threshold
         if self.best_mean_reward > self.threshold:
+            # Check if number of rounds has increased by INCREASE_PERIOD
+            if result and (self.num_timesteps % INCREASE_PERIOD == 0):
+                models_archive.append((self.model, self.last_mean_reward))
+                print(f"New Agent Variant Added. Agent Count {len(models_archive)}")
+
             print("TOUR_PLAY: New Positive reward achieved", )
             source_file = os.path.join(LOG_DIR, f"best_model.zip")
             backup_file = os.path.join(LOG_DIR, "Agent_" + str(self.best_mean_reward).zfill(5) + ".zip")
@@ -77,11 +80,12 @@ class AgainstArchiveAgentCallback(EvalCallback):
 def train():
     configure(folder=LOG_DIR)
 
-    env = TrainAgainstArchiveAgentsEnv()
+    env = Monitor(TrainAgainstArchiveAgentsEnv(), LOG_DIR)
     # SubprocVecEnv([(lambda: TrainAgainstAllAgentsEnv()) for _ in range(2)])  # TrainAgainstAllAgentsEnv()
     env.seed(random.choice(range(MAX_SEED)))
 
-    new_model = PPO("MlpPolicy", env, learning_rate=(lambda rate_left: rate_left * 3e-4), verbose=2)
+    new_model = PPO("MlpPolicy", env, learning_rate=(lambda rate_left: rate_left * 5e-4), verbose=2)
+    # (lambda rate_left: rate_left * 3e-4)
 
     eval_callback = AgainstArchiveAgentCallback(eval_env=env,
                                                 best_model_save_path=LOG_DIR,
