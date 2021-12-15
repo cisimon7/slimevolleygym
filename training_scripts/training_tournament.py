@@ -1,37 +1,38 @@
-import time
-from shutil import copyfile
-from typing import Dict, Tuple, Any, Optional, List
 import os
+import time
+import torch
 import random
-
-from stable_baselines3.common.monitor import Monitor
+from shutil import copyfile
+import matplotlib.pyplot as plt
+from typing import Dict, Tuple, Any, Optional, List
 
 import slimevolleygym
 import concurrent.futures
 import multiprocessing as mp
-from stable_baselines3.ppo import PPO
+from slimevolleygym import BaselinePolicy
+from stable_baselines3.ppo import PPO, MlpPolicy
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.callbacks import EvalCallback
-from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.logger import Logger, configure
-
-from slimevolleygym import BaselinePolicy
+from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.callbacks import EvalCallback, BaseCallback
+from stable_baselines3.common.results_plotter import load_results, plot_results, ts2xy
 
 BASE_MODEL = PPO.load("PPO_SelfPlay/best_model.zip")  # Load model to use as base model
-INCREASE_PERIOD = 1e5
+INCREASE_PERIOD = 1e4
 MAX_SEED: int = 100
 EVAL_FREQ = int(1e5)
 EVAL_EPISODES = int(1e2)
 TIME_STEPS = int(1e9)
 
-LOG_DIR = "PPO_TrainingTour"
+LOG_DIR = "PPO_TrainingTour1"
 
 # Models to be trained against initial states
 models_archive: List[Tuple[Optional[BaseAlgorithm], Any]] = [
     # (Model, mean_reward)
-    (BASE_MODEL, 0),  # Initial Policy
-    (BaselinePolicy(), 0),  # Initial Policy
+    # (BASE_MODEL, 0),  # Initial Policy
+    # (BaselinePolicy(), 0),  # Initial Policy
 ]
 
 
@@ -41,16 +42,25 @@ class TrainAgainstArchiveAgentsEnv(slimevolleygym.SlimeVolleyEnv):
         self.policy = self
 
     def predict(self, obs):
-        rnd_model, _ = random.choice(models_archive)  # Selects random model from archive of models
-        action, _ = rnd_model.predict(obs)
-        return action
+        if len(models_archive) == 0:
+            return self.action_space.sample()
+        else:
+            rnd_model, _ = random.choice(models_archive)  # Selects random model from archive of models
+            action, _ = rnd_model.predict(obs)
+            return action
+
+    def step(self, action, other_action=None):
+        return super(TrainAgainstArchiveAgentsEnv, self).step(action, other_action)
+
+    def reset(self):
+        return super(TrainAgainstArchiveAgentsEnv, self).reset()
 
 
 class AgainstArchiveAgentCallback(EvalCallback):
     def __init__(self, *args, **kwargs):
         super(AgainstArchiveAgentCallback, self).__init__(*args, **kwargs)
-        self.current_best = self.best_mean_reward
-        self.threshold = 0.1
+        self.prev_best = self.best_mean_reward
+        self.threshold = -3
 
     def _on_step(self) -> bool:
         result = super(AgainstArchiveAgentCallback, self)._on_step()
@@ -58,16 +68,17 @@ class AgainstArchiveAgentCallback(EvalCallback):
         if self.num_timesteps % EVAL_FREQ == 0:
             print(f"Current Best: {self.best_mean_reward}")
 
-        if result and self.current_best < self.best_mean_reward < 0:
-            self.model.save(os.path.join(LOG_DIR, "current_best" + str(int(self.best_mean_reward)).zfill(5)))
+        if result and self.prev_best < self.best_mean_reward < 0:
+            self.model.save(os.path.join(LOG_DIR, "current_best" + str(self.best_mean_reward).zfill(5)))
+            self.prev_best = self.best_mean_reward
 
         # Archive grows only when we've reach certain threshold
-        if self.best_mean_reward > self.threshold:
-            # Check if number of rounds has increased by INCREASE_PERIOD
-            if result and (self.num_timesteps % INCREASE_PERIOD == 0):
-                models_archive.append((self.model, self.last_mean_reward))
-                print(f"New Agent Variant Added. Agent Count {len(models_archive)}")
+        if result and (self.prev_best + 0.05) < self.best_mean_reward:
+            models_archive.append((self.model, self.last_mean_reward))
+            print(f"New Agent Variant Added. Agent Count {len(models_archive)}")
+            self.prev_best = self.best_mean_reward
 
+        if self.best_mean_reward > self.threshold:
             print("TOUR_PLAY: New Positive reward achieved", )
             source_file = os.path.join(LOG_DIR, f"best_model.zip")
             backup_file = os.path.join(LOG_DIR, "Agent_" + str(self.best_mean_reward).zfill(5) + ".zip")
@@ -77,15 +88,49 @@ class AgainstArchiveAgentCallback(EvalCallback):
         return result
 
 
+class PlottingCallback(BaseCallback):
+    def __init__(self):
+        super(PlottingCallback, self).__init__()
+        self.plot = None
+
+    def _on_step(self) -> bool:
+        # Get monitor data
+        x, y = ts2xy(load_results(LOG_DIR), "timesteps")
+
+        if self.plot is None:
+            plt.ion()
+            fig = plt.figure(figsize=(6, 3))
+            ax = fig.add_subplot(111)
+            line, = ax.plot(x, y)
+            self.plot = (line, ax, fig)
+            plt.show()
+        else:
+            self.plot[0].set_data(x, y)
+            self.plot[1].relim()
+            self.plot[1].set_xlim([
+                self.locals["total_timesteps"] * -0.02,
+                self.locals["total_timesteps"] * +1.02
+            ])
+            self.plot[1].autoscale_view(True, True, True)
+            self.plot[-1].canvas.draw()
+
+        return super(PlottingCallback, self)._on_step()
+
+
 def train():
-    configure(folder=LOG_DIR)
+    logger = configure(folder=LOG_DIR, format_strings=["stdout", "csv", "tensorboard"])
+
+    torch.set_num_threads(4)
 
     env = Monitor(TrainAgainstArchiveAgentsEnv(), LOG_DIR)
-    # SubprocVecEnv([(lambda: TrainAgainstAllAgentsEnv()) for _ in range(2)])  # TrainAgainstAllAgentsEnv()
-    env.seed(random.choice(range(MAX_SEED)))
+    # SubprocVecEnv([(lambda: TrainAgainstArchiveAgentsEnv()) for _ in range(2)])
+    # Monitor(TrainAgainstArchiveAgentsEnv(), LOG_DIR)
 
-    new_model = PPO("MlpPolicy", env, learning_rate=(lambda rate_left: rate_left * 5e-4), verbose=2)
-    # (lambda rate_left: rate_left * 3e-4)
+    env.seed(17)  # random.choice(range(MAX_SEED))
+
+    new_model = PPO("MlpPolicy", env, learning_rate=(lambda rate_left: rate_left * 3e-4), n_steps=1024, batch_size=1024,
+                    verbose=2, gae_lambda=0.95, gamma=0.99, ent_coef=0.0)
+    new_model.set_logger(logger)
 
     eval_callback = AgainstArchiveAgentCallback(eval_env=env,
                                                 best_model_save_path=LOG_DIR,
@@ -94,7 +139,9 @@ def train():
                                                 n_eval_episodes=EVAL_EPISODES,
                                                 deterministic=False)
 
-    new_model.learn(total_timesteps=TIME_STEPS, callback=[eval_callback])
+    plot_callback = PlottingCallback()
+
+    new_model.learn(total_timesteps=TIME_STEPS, callback=[eval_callback, plot_callback])
 
     new_model.save(os.path.join(LOG_DIR, "final_model"))  # probably never get to this point.
 
