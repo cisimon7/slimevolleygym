@@ -26,7 +26,7 @@ EVAL_FREQ = int(1e5)
 EVAL_EPISODES = int(1e2)
 TIME_STEPS = int(1e9)
 
-LOG_DIR = "PPO_TrainingTour3"
+LOG_DIR = "PPO_TrainingTour4"
 
 # Models to be trained against initial states
 models_archive = [
@@ -61,6 +61,7 @@ class AgainstArchiveAgentCallback(EvalCallback):
         super(AgainstArchiveAgentCallback, self).__init__(*args, **kwargs)
         self.prev_best = self.best_mean_reward
         self.threshold = -4.5
+        self.pretrained = False
 
     def _on_step(self) -> bool:
         result = super(AgainstArchiveAgentCallback, self)._on_step()
@@ -77,7 +78,8 @@ class AgainstArchiveAgentCallback(EvalCallback):
 
         # We add our initial baseline policy and Fixed BaselinePolicy when mean reward becomes positive
         # We add them now because the robot is trained enough to beat them
-        if self.best_mean_reward > (-1):
+        if (not self.pretrained) and self.best_mean_reward > (-1):
+            self.pretrained = True
             models_archive.append((BASE_MODEL, 0))
             models_archive.append((BaselinePolicy(), 0))
 
