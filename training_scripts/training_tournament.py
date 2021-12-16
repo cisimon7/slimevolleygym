@@ -26,10 +26,10 @@ EVAL_FREQ = int(1e5)
 EVAL_EPISODES = int(1e2)
 TIME_STEPS = int(1e9)
 
-LOG_DIR = "PPO_TrainingTour1"
+LOG_DIR = "PPO_TrainingTour3"
 
 # Models to be trained against initial states
-models_archive: List[Tuple[Optional[BaseAlgorithm], Any]] = [
+models_archive = [
     # (Model, mean_reward)
     # (BASE_MODEL, 0),  # Initial Policy
     # (BaselinePolicy(), 0),  # Initial Policy
@@ -60,30 +60,26 @@ class AgainstArchiveAgentCallback(EvalCallback):
     def __init__(self, *args, **kwargs):
         super(AgainstArchiveAgentCallback, self).__init__(*args, **kwargs)
         self.prev_best = self.best_mean_reward
-        self.threshold = -3
+        self.threshold = -4.5
 
     def _on_step(self) -> bool:
         result = super(AgainstArchiveAgentCallback, self)._on_step()
 
-        if self.num_timesteps % EVAL_FREQ == 0:
-            print(f"Current Best: {self.best_mean_reward}")
+        if self.best_mean_reward > self.threshold:
+            backup_file = os.path.join(
+                LOG_DIR, "Agent_" + str(len(models_archive)) + "*" + str(self.best_mean_reward).zfill(5) + ".zip")
+            source_file = os.path.join(LOG_DIR, f"best_model.zip")
+            copyfile(source_file, backup_file)
 
-        if result and self.prev_best < self.best_mean_reward < 0:
-            self.model.save(os.path.join(LOG_DIR, "current_best" + str(self.best_mean_reward).zfill(5)))
-            self.prev_best = self.best_mean_reward
-
-        # Archive grows only when we've reach certain threshold
-        if result and (self.prev_best + 0.05) < self.best_mean_reward:
             models_archive.append((self.model, self.last_mean_reward))
             print(f"New Agent Variant Added. Agent Count {len(models_archive)}")
-            self.prev_best = self.best_mean_reward
+            self.threshold = self.best_mean_reward + 0.02
 
-        if self.best_mean_reward > self.threshold:
-            print("TOUR_PLAY: New Positive reward achieved", )
-            source_file = os.path.join(LOG_DIR, f"best_model.zip")
-            backup_file = os.path.join(LOG_DIR, "Agent_" + str(self.best_mean_reward).zfill(5) + ".zip")
-            copyfile(source_file, backup_file)
-            self.threshold += 0.1
+        # We add our initial baseline policy and Fixed BaselinePolicy when mean reward becomes positive
+        # We add them now because the robot is trained enough to beat them
+        if self.best_mean_reward > (-1):
+            models_archive.append((BASE_MODEL, 0))
+            models_archive.append((BaselinePolicy(), 0))
 
         return result
 
@@ -128,8 +124,8 @@ def train():
 
     env.seed(17)  # random.choice(range(MAX_SEED))
 
-    new_model = PPO("MlpPolicy", env, learning_rate=(lambda rate_left: rate_left * 3e-4), n_steps=1024, batch_size=1024,
-                    verbose=2, gae_lambda=0.95, gamma=0.99, ent_coef=0.0)
+    new_model = PPO("MlpPolicy", env, learning_rate=(lambda rate_left: rate_left * 1e-4), n_steps=1024,
+                    batch_size=1024, verbose=2, gae_lambda=0.95, gamma=0.99, ent_coef=0.0)
     new_model.set_logger(logger)
 
     eval_callback = AgainstArchiveAgentCallback(eval_env=env,
@@ -141,7 +137,8 @@ def train():
 
     plot_callback = PlottingCallback()
 
-    new_model.learn(total_timesteps=TIME_STEPS, callback=[eval_callback, plot_callback])
+    # adding plot_callback makes training run slow
+    new_model.learn(total_timesteps=TIME_STEPS, callback=[eval_callback])
 
     new_model.save(os.path.join(LOG_DIR, "final_model"))  # probably never get to this point.
 
