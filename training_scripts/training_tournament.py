@@ -1,23 +1,18 @@
 import os
 import time
-import torch
 import random
 from shutil import copyfile
+
+import torch
 import matplotlib.pyplot as plt
-from typing import Dict, Tuple, Any, Optional, List
+from stable_baselines3.ppo import PPO
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.logger import configure
+from stable_baselines3.common.results_plotter import load_results, ts2xy
+from stable_baselines3.common.callbacks import EvalCallback, BaseCallback
 
 import slimevolleygym
-import concurrent.futures
-import multiprocessing as mp
 from slimevolleygym import BaselinePolicy
-from stable_baselines3.ppo import PPO, MlpPolicy
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.logger import Logger, configure
-from stable_baselines3.common.base_class import BaseAlgorithm
-from stable_baselines3.common.callbacks import EvalCallback, BaseCallback
-from stable_baselines3.common.results_plotter import load_results, plot_results, ts2xy
 
 BASE_MODEL = PPO.load("PPO_SelfPlay/best_model.zip")  # Load model to use as base model
 INCREASE_PERIOD = 1e4
@@ -29,11 +24,7 @@ TIME_STEPS = int(1e9)
 LOG_DIR = "PPO_TrainingTour4"
 
 # Models to be trained against initial states
-models_archive = [
-    # (Model, mean_reward)
-    # (BASE_MODEL, 0),  # Initial Policy
-    # (BaselinePolicy(), 0),  # Initial Policy
-]
+models_archive = []
 
 
 class TrainAgainstArchiveAgentsEnv(slimevolleygym.SlimeVolleyEnv):
@@ -121,8 +112,6 @@ def train():
     torch.set_num_threads(4)
 
     env = Monitor(TrainAgainstArchiveAgentsEnv(), LOG_DIR)
-    # SubprocVecEnv([(lambda: TrainAgainstArchiveAgentsEnv()) for _ in range(2)])
-    # Monitor(TrainAgainstArchiveAgentsEnv(), LOG_DIR)
 
     env.seed(17)  # random.choice(range(MAX_SEED))
 

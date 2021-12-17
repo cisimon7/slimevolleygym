@@ -105,12 +105,13 @@ def evaluate_multiagent(env, policy0, policy1, render_mode=False, n_trials=1000,
         cumulative_score = rollout(env, policy0, policy1, render_mode=render_mode)
         print("cumulative score #", i, ":", cumulative_score)
         history.append(cumulative_score)
+
     return history
 
 
 if __name__ == "__main__":
 
-    APPROVED_MODELS = ["baseline", "ppo", "ga", "cma", "random", "tour_ppo"]
+    APPROVED_MODELS = ["baseline", "ppo", "ga", "cma", "random", "tour", "tour1", "tour2", "tour3", "tour4"]
 
 
     def checkchoice(choice):
@@ -122,16 +123,25 @@ if __name__ == "__main__":
 
     PATH = {
         "baseline": None,
-        "ppo": "training_scripts/PPO_SelfPlay/best_model.zip", #"training_scripts/my_ppo1_selfplay/final_model.zip",  # f"{model_dir}/ppo/best_model",
         "cma": f"{model_dir}/cmaes/slimevolley.cma.64.96.best.json",
         "ga": f"{model_dir}/ga_sp/ga.json",
-        "tour_ppo": "training_scripts/training_tour/final_model00000.zip",
+        "ppo": "training_scripts/PPO_SelfPlay/best_model.zip",
+        "tour": "training_scripts/PPO_TrainingTour/best_model.zip",
+        "tour4": "training_scripts/PPO_TrainingTour4/best_model.zip",
+        "tour3": "training_scripts/PPO_TrainingTour3/best_model.zip",
+        "tour2": "training_scripts/PPO_TrainingTour2/best_model.zip",
+        "tour1": "training_scripts/PPO_TrainingTour1/best_model.zip",
         "random": None,
     }
 
     MODEL = {
         "baseline": makeBaselinePolicy,
         "ppo": PPOPolicy,
+        "tour": PPOPolicy,
+        "tour1": PPOPolicy,
+        "tour2": PPOPolicy,
+        "tour3": PPOPolicy,
+        "tour4": PPOPolicy,
         "cma": makeSlimePolicy,
         "ga": makeSlimePolicyLite,
         "tour_ppo": PPOPolicy,
