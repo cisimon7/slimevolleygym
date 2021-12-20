@@ -1,18 +1,17 @@
 import os
-import time
 import random
+import time
 from shutil import copyfile
 
-import torch
 import matplotlib.pyplot as plt
-from stable_baselines3.ppo import PPO
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.logger import configure
-from stable_baselines3.common.results_plotter import load_results, ts2xy
+import torch
 from stable_baselines3.common.callbacks import EvalCallback, BaseCallback
+from stable_baselines3.common.logger import configure
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.results_plotter import load_results, ts2xy
+from stable_baselines3.ppo import PPO
 
 import slimevolleygym
-from slimevolleygym import BaselinePolicy
 
 BASE_MODEL = PPO.load("PPO_SelfPlay/best_model.zip")  # Load model to use as base model
 INCREASE_PERIOD = 1e4
